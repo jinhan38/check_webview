@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
@@ -27,19 +29,11 @@ class _ExampleBrowser extends State<ExampleBrowser> {
   }
 
   Future<void> initPlatformState() async {
-    // Optionally initialize the webview environment using
-    // a custom user data directory
-    // and/or a custom browser executable directory
-    // and/or custom chromium command line flags
-    //await WebviewController.initializeEnvironment(
-    //    additionalArguments: '--show-fps-counter');
-
     try {
       await _controller.initialize();
       initController = true;
       _controller.url.listen((url) async {
         final response = await http.get(Uri.parse(url));
-        print('_ExampleBrowser.initPlatformState url : $url');
         dom.Document html = dom.Document.html(response.body);
         var bb = html
             .querySelectorAll("div.dd > ul > li > a.btn")
@@ -49,20 +43,25 @@ class _ExampleBrowser extends State<ExampleBrowser> {
             .querySelectorAll("div.dd > ul > li > a.btn")
             .map((element) => element.attributes)
             .toList();
-        print('_ExampleBrowser.initPlatformState bbb : $bb');
-        print('_ExampleBrowser.initPlatformState bbb : $cc');
+        print('_ExampleBrowser.initPlatformState innerHtml : $bb');
+        print('_ExampleBrowser.initPlatformState attributes : $cc');
         _textController.text = url;
         _controller.addScriptToExecuteOnDocumentCreated(js).then((value) {
-          print('_ExampleBrowser.initPlatformState idddd : $value');
+          print('_ExampleBrowser.initPlatformState id : $value');
+          _controller.executeScript("console.log('화면 갱신 확인')");
+          _controller.executeScript("alert('화면 갱신 확인')");
         });
       });
 
       await _controller.setBackgroundColor(Colors.transparent);
       await _controller.setPopupWindowPolicy(WebviewPopupWindowPolicy.deny);
       await _controller.loadUrl('https://flutter.dev');
-
       if (!mounted) return;
       setState(() {});
+
+      _controller.webMessage.listen((event) {
+        print('webMessage event : $event');
+      });
     } on PlatformException catch (e) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         showDialog(
@@ -90,82 +89,6 @@ class _ExampleBrowser extends State<ExampleBrowser> {
     }
   }
 
-  Widget compositeView() {
-    if (!_controller.value.isInitialized) {
-      return const Text(
-        'Not Initialized',
-        style: TextStyle(
-          fontSize: 24.0,
-          fontWeight: FontWeight.w900,
-        ),
-      );
-    } else {
-      return Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            Card(
-              elevation: 0,
-              child: Row(children: [
-                Expanded(
-                  child: TextField(
-                    decoration: const InputDecoration(
-                      hintText: 'URL',
-                      contentPadding: EdgeInsets.all(10.0),
-                    ),
-                    textAlignVertical: TextAlignVertical.center,
-                    controller: _textController,
-                    onSubmitted: (val) {
-                      _controller.loadUrl(val);
-                    },
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.refresh),
-                  splashRadius: 20,
-                  onPressed: () {
-                    _controller.reload();
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Icons.developer_mode),
-                  tooltip: 'Open DevTools',
-                  splashRadius: 20,
-                  onPressed: () {
-                    _controller.openDevTools();
-                  },
-                )
-              ]),
-            ),
-            Expanded(
-                child: Card(
-                    color: Colors.transparent,
-                    elevation: 0,
-                    clipBehavior: Clip.antiAliasWithSaveLayer,
-                    child: Stack(
-                      children: [
-                        Webview(
-                          _controller,
-                          permissionRequested: _onPermissionRequested,
-                        ),
-                        StreamBuilder<LoadingState>(
-                            stream: _controller.loadingState,
-                            builder: (context, snapshot) {
-                              if (snapshot.hasData &&
-                                  snapshot.data == LoadingState.loading) {
-                                return const LinearProgressIndicator();
-                              } else {
-                                return const SizedBox();
-                              }
-                            }),
-                      ],
-                    ))),
-          ],
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -177,7 +100,6 @@ class _ExampleBrowser extends State<ExampleBrowser> {
           } else {
             await _controller.suspend();
           }
-
           setState(() {
             _isWebviewSuspended = !_isWebviewSuspended;
           });
@@ -193,7 +115,99 @@ class _ExampleBrowser extends State<ExampleBrowser> {
         },
       )),
       body: Center(
-        child: initController ? compositeView() : Text("초기화중"),
+        child: initController ? _webView() : const Text("초기화중"),
+      ),
+    );
+  }
+
+
+  Widget _webView() {
+    if (!_controller.value.isInitialized) {
+      return const Text(
+        'Not Initialized',
+        style: TextStyle(
+          fontSize: 24.0,
+          fontWeight: FontWeight.w900,
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          Card(
+            elevation: 0,
+            child: Row(children: [
+              Expanded(
+                child: TextField(
+                  decoration: const InputDecoration(
+                    hintText: 'URL',
+                    contentPadding: EdgeInsets.all(10.0),
+                  ),
+                  textAlignVertical: TextAlignVertical.center,
+                  controller: _textController,
+                  onSubmitted: (val) {
+                    _controller.loadUrl(val);
+                  },
+                ),
+              ),
+
+              /// 새로고침
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                splashRadius: 20,
+                onPressed: () {
+                  _controller.reload();
+                },
+              ),
+
+              /// open devtools
+              IconButton(
+                icon: const Icon(Icons.developer_mode),
+                tooltip: 'Open DevTools',
+                splashRadius: 20,
+                onPressed: () {
+                  _controller.openDevTools();
+                },
+              ),
+
+              /// open devtools
+              ElevatedButton(
+                  onPressed: () {
+                    _controller.executeScript("JavaScriptChannel.postMessage('aaaa')");
+                    _controller
+                        .postWebMessage(json.encode({"cursorChanged": "test"}))
+                        .then((value) {
+                      print('postWebMessage value :');
+                    });
+                  },
+                  child: const Text("이벤트 테스트"))
+            ]),
+          ),
+          Expanded(
+              child: Card(
+                  color: Colors.transparent,
+                  elevation: 0,
+                  clipBehavior: Clip.antiAliasWithSaveLayer,
+                  child: Stack(
+                    children: [
+                      Webview(
+                        _controller,
+                        permissionRequested: _onPermissionRequested,
+                      ),
+                      StreamBuilder<LoadingState>(
+                          stream: _controller.loadingState,
+                          builder: (context, snapshot) {
+                            if (snapshot.hasData &&
+                                snapshot.data == LoadingState.loading) {
+                              return const LinearProgressIndicator();
+                            } else {
+                              return const SizedBox();
+                            }
+                          }),
+                    ],
+                  ))),
+        ],
       ),
     );
   }
@@ -223,24 +237,12 @@ class _ExampleBrowser extends State<ExampleBrowser> {
     return decision ?? WebviewPermissionDecision.none;
   }
 
-  String js = '''    
+  String js = '''
+document.addEventListener("DOMSubtreeModified", onDetection);
 
-    function onScroll() {
-    console.log(window.scrollY);
-    }
-    window.addEventListener('scroll', onScroll);
+function onDetection() {
+  console.log('detectiosn');
+  document.removeEventListener("DOMSubtreeModified", onDetection);
+}
 ''';
-
-//   String js = '''
-// document.addEventListener("DOMSubtreeModified", onDetection);
-//
-// function onDetection() {
-//   Console.log('detectiosn');
-//   if (successAlertExists) {
-//     MobileApp.postMessage("success");
-//
-//     document.removeEventListener("DOMSubtreeModified", onDetection);
-//   }
-// }
-// ''';
 }
